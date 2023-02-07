@@ -109,6 +109,16 @@ struct Pipeline {
 	//helper for clip functions:
 	// returns (b - a) * t + a
 	static ShadedVertex lerp(ShadedVertex const &a, ShadedVertex const &b, float t);
+	
+	static bool point_is_in_segment_range(float x, float y, float x1, float y1, float x2, float y2);
+
+	static bool segment_intersects_diamond(int px, int py, float x1, float y1, float x2, float y2);
+
+	// helper for diamond rule exit check
+	static int diamond_region(int px, int py, float x, float y);
+
+	// helper for diamond rule exit check
+	// static bool exits(int px, int py, float x1, float y1, float x2, float y2);
 
 	//(3) assembles these vertices into primitives of type primitive_type
 	//(4) clips the primitives (possibly producing more/fewer output primitives)

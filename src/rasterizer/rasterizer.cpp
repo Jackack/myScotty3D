@@ -206,8 +206,7 @@ struct RasterJob {
 		}
 
 		//TODO: particles?
-
-
+		
 		//set lighting to something default-ish:
 
 		//"sun + sky" style:

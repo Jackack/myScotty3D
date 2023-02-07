@@ -8,6 +8,18 @@
 
 #include <iostream>
 
+
+// opposing directions sum to 0
+const int INSIDE_DIAMOND = 0;
+const int SW = 1;
+const int NE = -1;
+const int SE = 2;
+const int NW = -2;
+const int N = 3;
+const int S = -3;
+const int E = 4;
+const int W = -4;
+
 template< PrimitiveType primitive_type, class Program, uint32_t flags >
 void Pipeline< primitive_type, Program, flags >::run(
 		std::vector< Vertex > const &vertices,
@@ -203,6 +215,8 @@ auto Pipeline< p, P, F >::lerp(ShadedVertex const &a, ShadedVertex const &b, flo
 	return ret;
 }
 
+
+
 /*
  * clip_line - clip line to portion with -w <= x,y,z <= w, emit vertices of clipped line (if non-empty)
  *  va, vb: endpoints of line
@@ -316,6 +330,115 @@ void Pipeline< p, P, flags >::clip_triangle(
 	emit_vertex(vc);
 }
 
+template< PrimitiveType p, class P, uint32_t F >
+bool Pipeline< p, P, F >::point_is_in_segment_range(
+	float x, float y, float x1, float y1, float x2, float y2){
+	printf("x: %f, y: %f, x1:%f, y1:%f, x2:%f, y2:%f\n", x, y, x1, y1, x2, y2);
+	if (x1 <= x && x <= x2){
+		if (y1 <= y && y <= y2){
+			return true;
+		}else if (y2 <= y && y <= y1){
+			return true;
+		}
+	}
+	printf("%f, %f, is not in range\n", x, y);
+	return false;
+}
+
+template< PrimitiveType p, class P, uint32_t F >
+bool Pipeline< p, P, F >::segment_intersects_diamond(
+	int px, int py, float x1, float y1, float x2, float y2){
+	// special case: vertical segment
+	if (x2 == x1 && y2 != y1){
+		// first check x value
+		if (static_cast<float>(px) <= x1 
+			&& x1 < static_cast<float>(px) + 1.0f){
+			return point_is_in_segment_range(x1, static_cast<float>(py) + 0.5f, 
+			x1, y1, x2, y2);
+		}
+		return false;
+	}
+
+	// left to right direction
+	if (x2 < x1){
+		float x1t = x1;
+		x1 = x2;
+		x2 = x1t;
+		float y1t = y1;
+		y1 = y2;
+		y2 = y1t;
+	}
+	// compute intercepts
+	float m = (y2 - y1)/(x2 - x1);
+	float b = y1 - x1 * m;
+	float horizontal_intercept = (static_cast<float>(py) - b) / m;
+	float vertical_intercept = m * static_cast<float>(px) + b;
+
+	// if either intersects are within 0.5 from pixel center and
+	// inside the segment, the segment intersects the pixel.
+	if (static_cast<float>(px) <= horizontal_intercept
+		&& horizontal_intercept < static_cast<float>(px) + 1.0f){
+		// check if the intercept point is actually on the segment
+		// since the intercept check only makes sure that the line of 
+		// infinte length aligned to the segment intersects the diamond
+		return point_is_in_segment_range(horizontal_intercept, static_cast<float>(py) + 0.5f, 
+			x1, y1, x2, y2);
+	}
+
+	printf("vertical intercept: %f\n", vertical_intercept);
+	if (static_cast<float>(py) <= vertical_intercept
+		&& vertical_intercept < static_cast<float>(py) + 1.0f){
+		return point_is_in_segment_range(static_cast<float>(px) + 0.5f, vertical_intercept,
+			x1, y1, x2, y2);
+	}
+	return false;
+}
+
+// helper function to implement diamond rule
+// return values:
+// 0: inside diamond
+// 1: SW
+// 2: SE
+// 3: NW
+// 4: NE
+template< PrimitiveType p, class P, uint32_t F >
+int Pipeline< p, P, F >::diamond_region(
+	int px, int py, float x, float y){
+	float x_center = static_cast<float>(px) + 0.5f;
+	float y_center = static_cast<float>(py) + 0.5f;
+
+	// specifically exclude top and right endpoint of diamond
+	if (x == px + 1.0f && y == py + 0.5f){
+		// right endpoint
+		return E;
+	}
+
+	if (x == px + 0.5f && y == py + 1.0f){
+		// top endpoint
+		return N;
+	}
+
+	// check if inside diamond
+	if (std::abs(x_center - x) + std::abs(y_center - y) <= 0.5f){
+		return INSIDE_DIAMOND;
+	}
+
+	if (x <= x_center && y <= y_center){
+		return SW;
+	}
+
+	if (x > x_center && y <= y_center){
+		return SE;
+	}
+	
+	if (x <= x_center && y > y_center){
+		return NW;
+	}
+	return NE;
+}
+
+
+
 //-------------------------------------------------------------------------
 //rasterization functions
 
@@ -360,21 +483,139 @@ void Pipeline< p, P, flags >::rasterize_line(
 		assert(0 && "rasterize_line should only be invoked in flat interpolation mode.");
 	}
 	//A1T2: rasterize_line
-
+	
 	//TODO: Check out the block comment above this function for more information on how to fill in this function!
 	// 		The OpenGL specification section 3.5 may also come in handy.
 
-	{ //As a placeholder, draw a point in the middle of the line:
-		//(remove this code once you have a real implementation)
-		Fragment mid;
-		mid.fb_position = (va.fb_position + vb.fb_position) / 2.0f;
-		mid.attributes = va.attributes;
-		mid.derivatives.fill(Vec2(0.0f, 0.0f));
-		emit_fragment(mid);
+	// { //As a placeholder, draw a point in the middle of the line:
+	// 	//(remove this code once you have a real implementation)
+	// 	Fragment mid;
+	// 	mid.fb_position = (va.fb_position + vb.fb_position) / 2.0f;
+	// 	mid.attributes = va.attributes;
+	// 	mid.derivatives.fill(Vec2(0.0f, 0.0f));
+	// 	emit_fragment(mid); 
+	// }
+
+	float xa_f = va.fb_position.x;
+	float xb_f = vb.fb_position.x;
+	float ya_f = va.fb_position.y;
+	float yb_f = vb.fb_position.y;
+	int xa = static_cast<int>(xa_f);
+	int ya = static_cast<int>(ya_f);
+	int xb = static_cast<int>(xb_f);
+	int yb = static_cast<int>(yb_f);
+
+	bool emit_start_pixel = false;
+	bool emit_end_pixel = true;
+
+	// apply diamond exit rule for first pixel
+	if (diamond_region(xa, ya, xa_f, ya_f) == INSIDE_DIAMOND
+		&& diamond_region(xa, ya, xb_f, yb_f) != INSIDE_DIAMOND){
+		// if the first pixel is inside the diamond 
+		// and the last pixel is not inside the same diamond
+		// we can emit the 1st pixel.
+		emit_start_pixel = true;
+		printf("condition 1\n");
+	}else if (segment_intersects_diamond(xa, ya, xa_f, ya_f, xb_f, yb_f)){
+		// if the first pixel is not in the diamond,
+		// emit if the line segment intersects the 
+		// diamond
+		printf("condition 2\n");
+		emit_start_pixel = true;
 	}
 
-}
+	// apply diamond exit rule for last pixel
+	if (diamond_region(xb, yb, xb_f, yb_f) == INSIDE_DIAMOND){
+		// if the last pixel is in its diamond, dont emit
+		// since the segment doesnt exit that diamond
+		emit_end_pixel = false;
+		printf("condition 3\n");
+	}else if (!segment_intersects_diamond(xb, yb, xa_f, ya_f, xb_f, yb_f)){
+		// if the last pixel is not in its diamond, dont emit
+		// if the segment doesnt intersect that diamond
+		emit_end_pixel = false;
+		printf("condition 4\n");
+	}
 
+	// printf("s%d, e%d\n", emit_start_pixel, emit_end_pixel);
+
+	// int dx = xb - xa;
+	// int dy = yb - ya;
+	// int dE= 2 * dy;
+	// int dNE = 2 * dy - 2 * dx;
+	// int d;
+	// int y = ya;
+	
+	
+	// for (int x = xa; x <= xb; x++) {
+	// 	d = 2 * dy - dx;
+	// 	if (d <= 0){
+	// 		d = d + dE;
+	// 	}else{
+	// 		d = d + dNE;
+	// 		y ++;
+	// 	}
+	// 	if (x == xa && !emit_start_pixel)
+	// 		continue;
+		
+	// 	if (x == xb && !emit_end_pixel)
+	// 		continue;
+
+	// 	Fragment f;
+	// 	f.fb_position.x = static_cast<float>(x) + 0.5f;
+	// 	f.fb_position.y = static_cast<float>(y) + 0.5f;
+	// 	printf("x%f, y%f\n", f.fb_position.x, f.fb_position.y);
+	// 	f.derivatives.fill(Vec2(0.0f, 0.0f));
+	// 	emit_fragment(f);
+	// }
+
+	int w = xb - xa;
+    int h = yb - ya;
+	int x = xa;
+	int y = ya;
+    int dx1 = 0, dy1 = 0, dx2 = 0, dy2 = 0 ;
+    if (w<0) dx1 = -1 ; else if (w>0) dx1 = 1 ;
+    if (h<0) dy1 = -1 ; else if (h>0) dy1 = 1 ;
+    if (w<0) dx2 = -1 ; else if (w>0) dx2 = 1 ;
+    int longest = std::abs(w) ;
+    int shortest = std::abs(h) ;
+    if (!(longest>shortest)) {
+        longest = std::abs(h) ;
+        shortest = std::abs(w) ;
+        if (h<0) dy2 = -1 ; else if (h>0) dy2 = 1 ;
+        dx2 = 0 ;            
+    }
+	
+    int numerator = longest >> 1 ;
+    for (int i = 0;i <= longest;i++) {
+		bool skip_emit = false;
+		if (i == 0 && !emit_start_pixel)
+			skip_emit = true;
+		
+		if (i == longest && !emit_end_pixel)
+			skip_emit = true;
+
+		if (!skip_emit){
+			Fragment f;
+			f.fb_position.x = static_cast<float>(x) + 0.5f;
+			f.fb_position.y = static_cast<float>(y) + 0.5f;
+			printf("x%f, y%f\n", f.fb_position.x, f.fb_position.y);
+			f.derivatives.fill(Vec2(0.0f, 0.0f));
+			emit_fragment(f);
+		}
+
+        if (!(numerator < longest)) {
+            numerator -= longest;
+            x += dx1;
+            y += dy1;
+        } else {
+            x += dx2;
+            y += dy2;
+        }
+		numerator += shortest;
+	
+    }
+}
 
 /*
  *
