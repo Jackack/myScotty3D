@@ -333,7 +333,6 @@ void Pipeline< p, P, flags >::clip_triangle(
 template< PrimitiveType p, class P, uint32_t F >
 bool Pipeline< p, P, F >::point_is_in_segment_range(
 	float x, float y, float x1, float y1, float x2, float y2){
-	printf("x: %f, y: %f, x1:%f, y1:%f, x2:%f, y2:%f\n", x, y, x1, y1, x2, y2);
 	if (x1 <= x && x <= x2){
 		if (y1 <= y && y <= y2){
 			return true;
@@ -341,7 +340,6 @@ bool Pipeline< p, P, F >::point_is_in_segment_range(
 			return true;
 		}
 	}
-	printf("%f, %f, is not in range\n", x, y);
 	return false;
 }
 
@@ -385,7 +383,6 @@ bool Pipeline< p, P, F >::segment_intersects_diamond(
 			x1, y1, x2, y2);
 	}
 
-	printf("vertical intercept: %f\n", vertical_intercept);
 	if (static_cast<float>(py) <= vertical_intercept
 		&& vertical_intercept < static_cast<float>(py) + 1.0f){
 		return point_is_in_segment_range(static_cast<float>(px) + 0.5f, vertical_intercept,
@@ -436,6 +433,141 @@ int Pipeline< p, P, F >::diamond_region(
 	}
 	return NE;
 }
+
+
+// draw backwards lines as forward by swapping begin and end pixel behavior
+template< PrimitiveType p, class P, uint32_t flags >
+void Pipeline< p, P, flags >::draw_line(int xa, int ya, int xb, int yb,
+	bool emit_start_pixel,
+	bool emit_end_pixel,
+  	std::function< void(Fragment const &) > const &emit_fragment,
+	ClippedVertex const &va, ClippedVertex const &vb){
+
+	// swap endpoint behavior, as well the endpoints themselves
+	// for a backwards line
+	if (xb < xa){
+		bool start_temp = emit_start_pixel;
+		emit_start_pixel = emit_end_pixel;
+		emit_end_pixel = start_temp;
+		int x_temp = xa;
+		int y_temp = ya;
+		xa = xb;
+		ya = yb;
+		xb = x_temp;
+		yb = y_temp;
+	}
+
+	float za = va.fb_position.z;
+	float zb = vb.fb_position.z;
+	float dist_ab = Vec2(xb - xa, yb - ya).norm();
+
+	if (std::abs(yb - ya) <= xb - xa && ya <= yb){
+		// positive slope x major
+		int slope_err = 0 - (xb - xa);
+		int y = ya;
+		bool skip = false;
+		for (int x = xa; x <= xb; x++) {
+			skip = (x == xa && !emit_start_pixel) || (x == xb && !emit_end_pixel);
+			Fragment f;
+			f.fb_position.x = static_cast<float>(x) + 0.5f;
+			f.fb_position.y = static_cast<float>(y) + 0.5f;
+			f.fb_position.z = za + Vec2(f.fb_position.x - xa, f.fb_position.y - ya).norm() / dist_ab * (zb - za);
+			f.attributes = va.attributes;
+			// printf("xd%d, yd%d, xf%f, yf%f, skip%d\n", x, y, f.fb_position.x, f.fb_position.y, skip);
+			if (!skip){
+				f.derivatives.fill(Vec2(0.0f, 0.0f));
+				emit_fragment(f);
+			}
+
+			slope_err += 2 * (yb - ya);
+				
+			if (slope_err > 0){
+				y++;
+				slope_err -= 2 * (xb - xa);
+			}
+
+		}
+	} else if (std::abs(yb - ya) <= xb - xa && ya > yb){
+		// negative slope x major
+		int slope_err = 0 - (xb - xa);
+		int y = ya;
+		bool skip = false;
+		for (int x = xa; x <= xb; x++) {
+			skip = (x == xa && !emit_start_pixel) || (x == xb && !emit_end_pixel);
+			Fragment f;
+			f.fb_position.x = static_cast<float>(x) + 0.5f;
+			f.fb_position.y = static_cast<float>(y) + 0.5f;
+			f.fb_position.z = za + Vec2(f.fb_position.x - xa, f.fb_position.y - ya).norm() / dist_ab * (zb - za);
+			f.attributes = va.attributes;
+			// printf("xd%d, yd%d, xf%f, yf%f, skip%d\n", x, y, f.fb_position.x, f.fb_position.y, skip);
+			if (!skip){
+				f.derivatives.fill(Vec2(0.0f, 0.0f));
+				emit_fragment(f);
+			}
+
+			slope_err += 2 * (ya - yb);
+				
+			if (slope_err > 0){
+				y--;
+				slope_err -= 2 * (xb - xa);
+			}
+		}
+	} else if (ya <= yb) {
+		// positive slope y major
+		int slope_err = 0 - (yb - ya);
+		int x = xa;
+		bool skip = false;
+		for (int y = ya; y <= yb; y++) {
+			skip = (y == ya && !emit_start_pixel) || (y == yb && !emit_end_pixel);
+			Fragment f;
+			f.fb_position.x = static_cast<float>(x) + 0.5f;
+			f.fb_position.y = static_cast<float>(y) + 0.5f;
+			f.fb_position.z = za + Vec2(f.fb_position.x - xa, f.fb_position.y - ya).norm() / dist_ab * (zb - za);
+			f.attributes = va.attributes;
+			// printf("xd%d, yd%d, xf%f, yf%f, skip%d\n", x, y, f.fb_position.x, f.fb_position.y, skip);
+			if (!skip){
+				f.derivatives.fill(Vec2(0.0f, 0.0f));
+				emit_fragment(f);
+			}
+
+			slope_err += 2 * (xb - xa);
+				
+			if (slope_err > 0){
+				x++;
+				slope_err -= 2 * (yb - ya);
+			}
+
+		}
+	} else {
+		// negative slope y major
+		printf("negative slope y major, xa%d, ya%d, xb%d, yb%d\n", xa, ya, xb, yb);
+		int slope_err = 0 - (yb - ya);
+		int x = xa;
+		bool skip = false;
+		for (int y = ya; y >= yb; y--) {
+			skip = (y == ya && !emit_start_pixel) || (y == yb && !emit_end_pixel);
+			Fragment f;
+			f.fb_position.x = static_cast<float>(x) + 0.5f;
+			f.fb_position.y = static_cast<float>(y) + 0.5f;
+			f.fb_position.z = za + Vec2(f.fb_position.x - xa, f.fb_position.y - ya).norm() / dist_ab * (zb - za);
+			f.attributes = va.attributes;
+			// printf("xd%d, yd%d, xf%f, yf%f, skip%d\n", x, y, f.fb_position.x, f.fb_position.y, skip);
+			if (!skip){
+				f.derivatives.fill(Vec2(0.0f, 0.0f));
+				emit_fragment(f);
+			}
+			slope_err += 2 * (xb - xa);
+				
+			if (slope_err > 0){
+				x++;
+				slope_err += 2 * (yb - ya);
+			}
+		}
+	}
+
+
+}
+
 
 
 
@@ -505,6 +637,8 @@ void Pipeline< p, P, flags >::rasterize_line(
 	int xb = static_cast<int>(xb_f);
 	int yb = static_cast<int>(yb_f);
 
+	// printf("xa%d, ya%d, xb%d, yb%d\n", xa, ya, xb, yb);
+
 	bool emit_start_pixel = false;
 	bool emit_end_pixel = true;
 
@@ -515,12 +649,12 @@ void Pipeline< p, P, flags >::rasterize_line(
 		// and the last pixel is not inside the same diamond
 		// we can emit the 1st pixel.
 		emit_start_pixel = true;
-		printf("condition 1\n");
+		// printf("condition 1\n");
 	}else if (segment_intersects_diamond(xa, ya, xa_f, ya_f, xb_f, yb_f)){
 		// if the first pixel is not in the diamond,
 		// emit if the line segment intersects the 
 		// diamond
-		printf("condition 2\n");
+		// printf("condition 2\n");
 		emit_start_pixel = true;
 	}
 
@@ -529,93 +663,123 @@ void Pipeline< p, P, flags >::rasterize_line(
 		// if the last pixel is in its diamond, dont emit
 		// since the segment doesnt exit that diamond
 		emit_end_pixel = false;
-		printf("condition 3\n");
+		// printf("condition 3\n");
 	}else if (!segment_intersects_diamond(xb, yb, xa_f, ya_f, xb_f, yb_f)){
 		// if the last pixel is not in its diamond, dont emit
 		// if the segment doesnt intersect that diamond
 		emit_end_pixel = false;
-		printf("condition 4\n");
+		// printf("condition 4\n");
 	}
 
-	// printf("s%d, e%d\n", emit_start_pixel, emit_end_pixel);
+	printf("s%d, e%d\n", emit_start_pixel, emit_end_pixel);
 
-	// int dx = xb - xa;
-	// int dy = yb - ya;
-	// int dE= 2 * dy;
-	// int dNE = 2 * dy - 2 * dx;
-	// int d;
-	// int y = ya;
-	
-	
-	// for (int x = xa; x <= xb; x++) {
-	// 	d = 2 * dy - dx;
-	// 	if (d <= 0){
-	// 		d = d + dE;
-	// 	}else{
-	// 		d = d + dNE;
-	// 		y ++;
-	// 	}
-	// 	if (x == xa && !emit_start_pixel)
-	// 		continue;
-		
-	// 	if (x == xb && !emit_end_pixel)
-	// 		continue;
-
-	// 	Fragment f;
-	// 	f.fb_position.x = static_cast<float>(x) + 0.5f;
-	// 	f.fb_position.y = static_cast<float>(y) + 0.5f;
-	// 	printf("x%f, y%f\n", f.fb_position.x, f.fb_position.y);
-	// 	f.derivatives.fill(Vec2(0.0f, 0.0f));
-	// 	emit_fragment(f);
-	// }
-
-	int w = xb - xa;
-    int h = yb - ya;
-	int x = xa;
-	int y = ya;
-    int dx1 = 0, dy1 = 0, dx2 = 0, dy2 = 0 ;
-    if (w<0) dx1 = -1 ; else if (w>0) dx1 = 1 ;
-    if (h<0) dy1 = -1 ; else if (h>0) dy1 = 1 ;
-    if (w<0) dx2 = -1 ; else if (w>0) dx2 = 1 ;
-    int longest = std::abs(w) ;
-    int shortest = std::abs(h) ;
-    if (!(longest>shortest)) {
-        longest = std::abs(h) ;
-        shortest = std::abs(w) ;
-        if (h<0) dy2 = -1 ; else if (h>0) dy2 = 1 ;
-        dx2 = 0 ;            
-    }
-	
-    int numerator = longest >> 1 ;
-    for (int i = 0;i <= longest;i++) {
-		bool skip_emit = false;
-		if (i == 0 && !emit_start_pixel)
-			skip_emit = true;
-		
-		if (i == longest && !emit_end_pixel)
-			skip_emit = true;
-
-		if (!skip_emit){
-			Fragment f;
-			f.fb_position.x = static_cast<float>(x) + 0.5f;
-			f.fb_position.y = static_cast<float>(y) + 0.5f;
-			printf("x%f, y%f\n", f.fb_position.x, f.fb_position.y);
-			f.derivatives.fill(Vec2(0.0f, 0.0f));
-			emit_fragment(f);
-		}
-
-        if (!(numerator < longest)) {
-            numerator -= longest;
-            x += dx1;
-            y += dy1;
-        } else {
-            x += dx2;
-            y += dy2;
-        }
-		numerator += shortest;
-	
-    }
+	draw_line(xa, ya, xb, yb, emit_start_pixel, emit_end_pixel, emit_fragment, va, vb);
 }
+
+// use Heron's formula to calculate the area of a triangle
+template< PrimitiveType p, class P, uint32_t flags >
+float Pipeline< p, P, flags >::area_triangle(Vec2 va, Vec2 vb, Vec2 vc){
+	float a = (va - vb).norm();
+	float b = (va - vc).norm();
+	float c = (vb - vc).norm();
+	float s = (a + b + c) / 2;
+	return std::sqrt(s * (s - a) * (s - b) * (s - c));
+}
+
+template< PrimitiveType p, class P, uint32_t flags >
+bool Pipeline< p, P, flags >::in_triangle(int x, int y,
+	ClippedVertex const &va, ClippedVertex const &vb, ClippedVertex const &vc){
+	// conduct a halfplane check on the pixel center at (x+0.5, y+0.5)
+	// start at the leftmost vertex. The two sides exiting this vertex
+	// are guaranteed to be top or left. Therefore, conduct inclusive
+	// halfplane check on these two sides. Then conduct exclusive halfplane
+	// check on the third side.
+
+
+	float x_center = x + 0.5f;
+	float y_center = y + 0.5f;
+
+	float x_min = std::min({va.fb_position.x, vb.fb_position.x, vc.fb_position.x});
+	float y_min = std::min({va.fb_position.y, vb.fb_position.y, vc.fb_position.y});
+	ClippedVertex vleft, v1, v2;
+	if (va.fb_position.x == x_min){
+		vleft = va;
+		v1 = vb;
+		v2 = vc;
+	} else if (vb.fb_position.x == x_min){
+		vleft = vb;
+		v1 = va;
+		v2 = vc;
+	} else {
+		vleft = vc;
+		v1 = va;
+		v2 = vb;
+	}
+
+	float m1 = (v1.fb_position.y - vleft.fb_position.y)/(v1.fb_position.x - vleft.fb_position.x);
+	float b1 = vleft.fb_position.y - vleft.fb_position.x * m1;
+
+	float m2 = (v2.fb_position.y - vleft.fb_position.y)/(v2.fb_position.x - vleft.fb_position.x);
+	float b2 = vleft.fb_position.y - vleft.fb_position.x * m2;
+
+	float m3 = (v2.fb_position.y - v1.fb_position.y)/(v2.fb_position.x - v1.fb_position.x);
+	float b3 = v1.fb_position.y - v1.fb_position.x * m3;
+
+	// sides 1 and 2 are connected to the leftmost edge.
+	// both side1 and side2 are inclusively checked,
+	// since they must either be left edge or top edge
+	// check side1 = vleft -> v1
+	// check vertical special case
+	if (v1.fb_position.x == vleft.fb_position.x){
+		if (x_center < v1.fb_position.x)
+			return false;
+	} else {
+		// if m1 > m2,  side 1 is the top side
+		if (m1 > m2 && y_center > m1 * x_center + b1)
+			return false;
+		if (m1 < m2 && y_center < m1 * x_center + b1)
+			return false;
+	}
+
+	// check side vleft -> v2
+	// check vertical special case
+	if (v2.fb_position.x == vleft.fb_position.x){
+		if (x_center < v2.fb_position.x)
+			return false;
+	} else {
+		// if m2 > m1,  side 2 is the top side
+		// check is y center is under that side
+		if (m2 > m1 && y_center > m2 * x_center + b2)
+			return false;
+		if (m2 < m1 && y_center < m2 * x_center + b2)
+			return false;
+	}
+
+	// check side v1 -> v2
+	// check vertical special case
+	if (v2.fb_position.x == v1.fb_position.x){
+		if (x_center >= v2.fb_position.x)
+			return false;
+	} else {
+		if (m3 > 0 && y_center <= m3 * x_center + b3)
+			return false;
+		if (m3 < 0 && y_center >= m3 * x_center + b3)
+			return false;
+		// horizontal third side: halfplane orientation 
+		// depends on whether the side is top or bottom
+		if (v2.fb_position.y == v1.fb_position.y){
+			// the thrid side is a bottom side
+			if (v2.fb_position.y == y_min && y_center <= y_min)
+				return false;
+			// the third side is a horizontal top side
+			// we include points on the edge for this case
+			if (v2.fb_position.y != y_min && y_center > v2.fb_position.y)
+				return false;
+		}
+	}
+	return true;
+}
+
 
 /*
  *
@@ -670,9 +834,68 @@ void Pipeline< p, P, flags >::rasterize_triangle(
 
 		//As a placeholder, here's code that draws some lines:
 		//(remove this and replace it with a real solution)
-		Pipeline< PrimitiveType::Lines, P, flags >::rasterize_line(va, vb, emit_fragment);
-		Pipeline< PrimitiveType::Lines, P, flags >::rasterize_line(vb, vc, emit_fragment);
-		Pipeline< PrimitiveType::Lines, P, flags >::rasterize_line(vc, va, emit_fragment);
+
+		// step 0: check if the triangle is degenerate. 
+		if (area_triangle(va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy()) == 0)
+			return;
+
+		// step 1: generate screeen space bounding box from the 3 vertices
+		int xmin = static_cast<int>(std::floor(std::min(va.fb_position.x, std::min(vb.fb_position.x, vc.fb_position.x))));
+		int xmax = static_cast<int>(std::ceil(std::max(va.fb_position.x, std::max(vb.fb_position.x, vc.fb_position.x))));
+		int ymin = static_cast<int>(std::floor(std::min(va.fb_position.y, std::min(vb.fb_position.y, vc.fb_position.y))));
+		int ymax = static_cast<int>(std::ceil(std::max(va.fb_position.y, std::max(vb.fb_position.y, vc.fb_position.y))));
+		float zmax = std::max(va.fb_position.z, std::max(vb.fb_position.z, vc.fb_position.z));
+		float za = va.fb_position.z;
+		float zb = vb.fb_position.z;
+		float zc = vc.fb_position.z;
+		bool same_z = false;
+		ClippedVertex vj, vk;
+
+		// printf("zabc: %f, %f, %f\n", za, zb, zc);
+		// assign vi, vj to the two vertices with smallest z
+		if (za == zb && zb == zc){
+			same_z = true;
+		}
+
+		if ((za != zmax && zb != zmax) || (za == zb)){
+			vj = va;
+			vk = vb;
+		} else if ((zc != zmax && zb != zmax) || (zc == zb)){
+			vj = vc;
+			vk = vb;
+		} else if ((za != zmax && zc != zmax) || (za == zc)){
+			vj = vc;
+			vk = va;
+		}
+
+		// step 2: iterate over all pixels inside bounding box, conducting a coverage
+		// test for each pixel. 
+
+		// step3: for each pixel passing coverage test, z value is interpolated using barycentric coordinates
+
+		for (int x = xmin; x <= xmax; x++){
+			for (int y = ymin; y <= ymax; y++){
+				if (in_triangle(x, y, va, vb, vc)){
+					float xf = static_cast<float>(x) + 0.5f;
+					float yf = static_cast<float>(y) + 0.5f;
+					float zf = va.fb_position.z;
+					if (same_z){
+						zf = za;
+					} else {
+						zf = zmax * area_triangle(Vec2(xf, yf), vj.fb_position.xy(), vk.fb_position.xy())
+							/ area_triangle(va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy());
+					}
+
+					Fragment f;
+					f.fb_position.x = xf;
+					f.fb_position.y = yf;
+					f.fb_position.z = zf;
+					f.attributes = va.attributes;
+					f.derivatives.fill(Vec2(0.0f, 0.0f));
+					emit_fragment(f);
+				}
+			}
+		}
 	} else if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Screen) {
 		//A1T5: screen-space smooth triangles
 		//TODO: rasterize triangle (see block comment above this function).

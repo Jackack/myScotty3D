@@ -8,10 +8,17 @@ Task A1T1:
 	Fully implemented.
 
 Task A1T2:
-	Fully implemented.
+	Attemmpted: use Bresenham to rasterize line. According to Discord discussion Bresenham guarantees
+	diamond exit rule compliance except in beginning and ending points. Therefore, I implemented diamond
+	exit rule check for beginning and ending points. I allow the bresenham loop to run as is, except 
+	if a begin/end point should not be emitted, the point would be skipped. In practice, there are often
+	off by one errors near the beginning of the pixel due to the fact that two lines with float starting
+	and ending points can map to the same integer starting and ending points, but require different 
+	pixels to be shaded according to diamond exit rule.
 
 Task A1T3:
-	Fully implemented.
+	Attempted: use a bounding box with a half plane check to rasterize triangles. Due to an unknown bug 
+	in the half plane coverage check, only one cube appears identical to the render shown in handout. 
 
 --- A1.5 ---
 

@@ -117,9 +117,6 @@ struct Pipeline {
 	// helper for diamond rule exit check
 	static int diamond_region(int px, int py, float x, float y);
 
-	// helper for diamond rule exit check
-	// static bool exits(int px, int py, float x1, float y1, float x2, float y2);
-
 	//(3) assembles these vertices into primitives of type primitive_type
 	//(4) clips the primitives (possibly producing more/fewer output primitives)
 	//uses one of these helpers, depending on the primitive type:
@@ -138,11 +135,24 @@ struct Pipeline {
 	//(6) rasterizes the primitives to produce Fragments:
 	using Fragment = ::Fragment< FA, FD >;
 
+	//ratesterize_line helper
+	static void draw_line(
+		int xa, int ya, int xb, int yb, 
+		bool emit_start_pixel,
+		bool emit_end_pixel,
+  		std::function< void(Fragment const &) > const &emit_fragment,
+		ClippedVertex const &va, ClippedVertex const &vb
+	);
+
 	//rasterization uses one of these helper functions, depending on primitive type:
 	static void rasterize_line(
 		ClippedVertex const &a, ClippedVertex const &b, //line (a,b)
 		std::function< void(Fragment const &) > const &emit_fragment //call with every fragment covered by the line
 	);
+
+	static float area_triangle(Vec2 va, Vec2 vb, Vec2 vc);
+	static bool in_triangle(int x, int y,
+	ClippedVertex const &va, ClippedVertex const &vb, ClippedVertex const &vc);
 	static void rasterize_triangle(
 		ClippedVertex const &a, ClippedVertex const &b, ClippedVertex const &c, //triangle (a,b,c)
 		std::function< void(Fragment const &) > const &emit_fragment //call with every fragment covered by the triangle
