@@ -26,7 +26,29 @@ Spectrum sample_bilinear(HDR_Image const &image, Vec2 uv) {
 	//A1T6: sample_bilinear
 	//TODO: implement bilinear sampling strategy on texture 'image'
 
-	return sample_nearest(image, uv); //placeholder so image doesn't look blank
+	float x = image.w * std::clamp(uv.x, 0.0f, 1.0f);
+	float y = image.h * std::clamp(uv.y, 0.0f, 1.0f);
+
+	float f00_i = std::floor(x) + 0.5f;
+	float f00_j = std::floor(y) + 0.5f;
+	float s = std::clamp(x - (f00_i - 0.5f), 0.0f, 1.0f);
+	float t = std::clamp(y - (f00_j - 0.5f), 0.0f, 1.0f);
+	float f01_i = f00_i + 1.0f;;
+	float f01_j = f00_j;
+	float f10_i = f00_i;
+	float f10_j = f00_j + 1.0f;
+	float f11_i = f00_i + 1.0f;
+	float f11_j = f00_j + 1.0f;
+	Spectrum f00 = image.at(static_cast<int>(f00_i), static_cast<int>(f00_j));
+	Spectrum f01 = image.at(static_cast<int>(f01_i), static_cast<int>(f01_j));
+	Spectrum f10 = image.at(static_cast<int>(f10_i), static_cast<int>(f10_j));
+	Spectrum f11 = image.at(static_cast<int>(f11_i), static_cast<int>(f11_j));
+	printf("wh: %d, %d", image.w, image.h);
+	printf("x: %f, y: %f\n", x, y);
+	printf("f00: %f, %f\n", f00_i, f00_j);
+	printf("s%f, t%f\n", s, t);
+
+	return (1.0f - t) * ((1.0f - s) * f00 + s * f10) + t * ((1.0f - s) * f01 + s * f11);
 }
 
 

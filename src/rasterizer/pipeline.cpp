@@ -543,7 +543,7 @@ void Pipeline< p, P, flags >::draw_line(int xa, int ya, int xb, int yb,
 		}
 	} else {
 		// negative slope y major
-		printf("negative slope y major, xa%d, ya%d, xb%d, yb%d\n", xa, ya, xb, yb);
+		// printf("negative slope y major, xa%d, ya%d, xb%d, yb%d\n", xa, ya, xb, yb);
 		int slope_err = 0 - (yb - ya);
 		int x = xa;
 		bool skip = false;
@@ -674,7 +674,7 @@ void Pipeline< p, P, flags >::rasterize_line(
 		// printf("condition 4\n");
 	}
 
-	printf("s%d, e%d\n", emit_start_pixel, emit_end_pixel);
+	// printf("s%d, e%d\n", emit_start_pixel, emit_end_pixel);
 
 	draw_line(xa, ya, xb, yb, emit_start_pixel, emit_end_pixel, emit_fragment, va, vb);
 }
@@ -848,12 +848,6 @@ void Pipeline< p, P, flags >::rasterize_triangle(
 	// (e.g., if you break Flat while implementing Correct, you won't get points
 	//  for Flat.)
 	if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Flat) {
-		//A1T3: flat triangles
-		//TODO: rasterize triangle (see block comment above this function).
-
-		//As a placeholder, here's code that draws some lines:
-		//(remove this and replace it with a real solution)
-
 		// step 0: check if the triangle is degenerate. 
 		if (area_triangle(va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy()) == 0)
 			return;
@@ -923,11 +917,13 @@ void Pipeline< p, P, flags >::rasterize_triangle(
 		if (za == zb && zb == zc){
 			same_z = true;
 		}
+		const int VA_TexCoordU = 0;
+		const int VA_TexCoordV = 1;
 
 		// step 2: iterate over all pixels inside bounding box, conducting a coverage
 		// test for each pixel. 
 
-		// step3: for each pixel passing coverage test, z value is interpolated using barycentric coorhinates, and so are
+		// step3: for each pixel passing coverage test, z value is interpolated using barycentric coordinates, and so are
 		// attributes.
 
 		for (int x = xmin; x <= xmax; x++){
@@ -936,6 +932,7 @@ void Pipeline< p, P, flags >::rasterize_triangle(
 					float xf = static_cast<float>(x) + 0.5f;
 					float yf = static_cast<float>(y) + 0.5f;
 					float zf;
+					
 					if (same_z){
 						zf = za;
 					} else {
@@ -951,19 +948,50 @@ void Pipeline< p, P, flags >::rasterize_triangle(
 					f.fb_position.y = yf;
 					f.fb_position.z = zf;
 
-					int vertex_indices[5] = {6, 7, 3, 4, 5};
-					for (int i = 0; i < 4; i++){
-						int j = vertex_indices[i];
+					for (int i = 0; i < 5; i++){
 						f.attributes[i] =
 							interp_triangle(
-							Vec3(va.attributes[j], vb.attributes[j], vc.attributes[j]),
+							Vec3(va.attributes[i], vb.attributes[i], vc.attributes[i]),
 							Vec2(xf, yf),
 							va.fb_position.xy(), 
 							vb.fb_position.xy(),
 							vc.fb_position.xy());
 					}
 
-					f.derivatives.fill(Vec2(0.0f, 0.0f));
+					float x_plus1_u = interp_triangle(
+						Vec3(va.attributes[VA_TexCoordU], vb.attributes[VA_TexCoordU], vc.attributes[VA_TexCoordU]),
+						Vec2(xf + 1.0f, yf),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy());
+					float x_plus1_v = interp_triangle(
+						Vec3(va.attributes[VA_TexCoordV], vb.attributes[VA_TexCoordV], vc.attributes[VA_TexCoordV]),
+						Vec2(xf + 1.0f, yf),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy());
+					float y_plus1_u = interp_triangle(
+						Vec3(va.attributes[VA_TexCoordU], vb.attributes[VA_TexCoordU], vc.attributes[VA_TexCoordU]),
+						Vec2(xf, yf + 1.0f),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy());
+					float y_plus1_v = interp_triangle(
+						Vec3(va.attributes[VA_TexCoordV], vb.attributes[VA_TexCoordV], vc.attributes[VA_TexCoordV]),
+						Vec2(xf, yf + 1.0f),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy());
+
+					float dUdx = x_plus1_u - f.attributes[0];
+					float dVdx = x_plus1_v - f.attributes[1];
+					
+					float dUdy = y_plus1_u - f.attributes[0];
+					float dVdy = y_plus1_v - f.attributes[1];
+
+					f.derivatives[0] = Vec2(dUdx, dUdy);
+					f.derivatives[1] = Vec2(dVdx, dVdy);
+
 					emit_fragment(f);
 				}
 			}
@@ -971,12 +999,134 @@ void Pipeline< p, P, flags >::rasterize_triangle(
 
 
 	} else if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Correct) {
-		//A1T5: perspective correct triangles
-		//TODO: rasterize triangle (block comment above this function).
+		// step 0: check if the triangle is degenerate. 
+		if (area_triangle(va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy()) == 0)
+			return;
 
-		//As a placeholder, here's code that calls the Screen-space interpolation function:
-		//(remove this and replace it with a real solution)
-		Pipeline< PrimitiveType::Lines, P, (flags  & ~PipelineMask_Interp) | Pipeline_Interp_Screen >::rasterize_triangle(va, vb, vc, emit_fragment);
+		// step 1: generate screeen space bounding box from the 3 vertices
+		int xmin = static_cast<int>(std::floor(std::min(va.fb_position.x, std::min(vb.fb_position.x, vc.fb_position.x))));
+		int xmax = static_cast<int>(std::ceil(std::max(va.fb_position.x, std::max(vb.fb_position.x, vc.fb_position.x))));
+		int ymin = static_cast<int>(std::floor(std::min(va.fb_position.y, std::min(vb.fb_position.y, vc.fb_position.y))));
+		int ymax = static_cast<int>(std::ceil(std::max(va.fb_position.y, std::max(vb.fb_position.y, vc.fb_position.y))));
+
+		float za = va.fb_position.z;
+		float zb = vb.fb_position.z;
+		float zc = vc.fb_position.z;
+		bool same_z = false;
+		ClippedVertex vj, vk;
+		if (za == zb && zb == zc){
+			same_z = true;
+		}
+		const int VA_TexCoordU = 0;
+		const int VA_TexCoordV = 1;
+
+		// step 2: iterate over all pixels inside bounding box, conducting a coverage
+		// test for each pixel. 
+
+		// step3: for each pixel passing coverage test, z value is interpolated using barycentric coordinates, and so are
+		// attributes.
+
+		for (int x = xmin; x <= xmax; x++){
+			for (int y = ymin; y <= ymax; y++){
+				if (in_triangle(x, y, va, vb, vc)){
+					float xf = static_cast<float>(x) + 0.5f;
+					float yf = static_cast<float>(y) + 0.5f;
+					float zf;
+					
+					if (same_z){
+						zf = za;
+					} else {
+						zf = interp_triangle(
+							Vec3(va.fb_position.z, vb.fb_position.z, vc.fb_position.z),
+							Vec2(xf, yf),
+							va.fb_position.xy(), 
+							vb.fb_position.xy(),
+							vc.fb_position.xy());
+					}
+					Fragment f;
+					f.fb_position.x = xf;
+					f.fb_position.y = yf;
+					f.fb_position.z = zf;
+
+					// interp phi over w
+					float inv_w = interp_triangle(
+							Vec3(va.inv_w, vb.inv_w, vc.inv_w),
+							Vec2(xf, yf),
+							va.fb_position.xy(), 
+							vb.fb_position.xy(),
+							vc.fb_position.xy());
+
+					for (int i = 0; i < 5; i++){
+						f.attributes[i] =
+							interp_triangle(
+							Vec3(va.attributes[i]*va.inv_w, vb.attributes[i]*vb.inv_w, vc.attributes[i]*vc.inv_w),
+							Vec2(xf, yf),
+							va.fb_position.xy(), 
+							vb.fb_position.xy(),
+							vc.fb_position.xy()) / inv_w;
+					}
+
+					// derivatives
+					float inv_w_xplus1 = interp_triangle(
+						Vec3(va.inv_w, vb.inv_w, vc.inv_w),
+						Vec2(xf + 1.0f, yf),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy());
+
+					float inv_w_yplus1 = interp_triangle(
+						Vec3(va.inv_w, vb.inv_w, vc.inv_w),
+						Vec2(xf, yf + 1.0f),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy());
+
+					float x_plus1_u = interp_triangle(
+						Vec3(va.attributes[VA_TexCoordU]*va.inv_w,
+						 	vb.attributes[VA_TexCoordU]*vb.inv_w,
+						  	vc.attributes[VA_TexCoordU]*vb.inv_w),
+						Vec2(xf + 1.0f, yf),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy())/inv_w_xplus1;
+					float x_plus1_v = interp_triangle(
+						Vec3(va.attributes[VA_TexCoordV]*va.inv_w, 
+							vb.attributes[VA_TexCoordV]*vb.inv_w,
+							vc.attributes[VA_TexCoordV]*vb.inv_w),
+						Vec2(xf + 1.0f, yf),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy())/inv_w_xplus1;
+					float y_plus1_u = interp_triangle(
+						Vec3(va.attributes[VA_TexCoordU]*va.inv_w,
+							vb.attributes[VA_TexCoordU]*vb.inv_w,
+							vc.attributes[VA_TexCoordU]*vb.inv_w),
+						Vec2(xf, yf + 1.0f),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy())/inv_w_yplus1;
+					float y_plus1_v = interp_triangle(
+						Vec3(va.attributes[VA_TexCoordV]*va.inv_w, 
+							vb.attributes[VA_TexCoordV]*vb.inv_w, 
+							vc.attributes[VA_TexCoordV]*vb.inv_w),
+						Vec2(xf, yf + 1.0f),
+						va.fb_position.xy(), 
+						vb.fb_position.xy(),
+						vc.fb_position.xy())/inv_w_yplus1;
+
+					float dUdx = x_plus1_u - f.attributes[0];
+					float dVdx = x_plus1_v - f.attributes[1];
+					
+					float dUdy = y_plus1_u - f.attributes[0];
+					float dVdy = y_plus1_v - f.attributes[1];
+
+					f.derivatives[0] = Vec2(dUdx, dUdy);
+					f.derivatives[1] = Vec2(dVdx, dVdy);
+
+					emit_fragment(f);
+				}
+			}
+		}
 	}
 }
 

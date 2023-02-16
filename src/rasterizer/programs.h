@@ -109,9 +109,13 @@ struct Lambertian {
 		// reading onward, you will discover that \rho can be computed in a number of ways
 		//  it is up to you to select one that makes sense in this context
 
-		float lod = 0.0f; //<-- replace this line
-		//-----
+		Vec2 fdx_texcoord_scaled = wh.x * fdx_texcoord;
+		Vec2 fdy_texcoord_scaled = wh.y * fdy_texcoord;
 
+		float L = std::max(fdx_texcoord_scaled.norm(), fdy_texcoord_scaled.norm());
+		printf("LOD: %f\n", std::log2f(L));
+		
+		float lod = std::log2f(L);
 
 		Vec3 normal = fa_normal.unit();
 
@@ -122,6 +126,7 @@ struct Lambertian {
 			+ (parameters.sky_energy - parameters.ground_energy) * (0.5f * dot(parameters.sky_direction, normal) + 0.5f) + parameters.ground_energy;
 
 		color = parameters.image->evaluate(fa_texcoord, lod) * light;
+		printf("LOD2: %f\n", color.b);
 		opacity = parameters.opacity;
 	}
 
