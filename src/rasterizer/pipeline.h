@@ -109,7 +109,7 @@ struct Pipeline {
 	//helper for clip functions:
 	// returns (b - a) * t + a
 	static ShadedVertex lerp(ShadedVertex const &a, ShadedVertex const &b, float t);
-	
+
 	static bool point_is_in_segment_range(float x, float y, float x1, float y1, float x2, float y2);
 
 	static bool segment_intersects_diamond(int px, int py, float x1, float y1, float x2, float y2);
@@ -150,6 +150,9 @@ struct Pipeline {
 		std::function< void(Fragment const &) > const &emit_fragment //call with every fragment covered by the line
 	);
 
+
+	static Vec3 barycentric(Vec2 vp, Vec2 va, Vec2 vb, Vec2 vc);
+	static float interp_triangle(Vec3 traits, Vec2 vp, Vec2 va, Vec2 vb, Vec2 vc);
 	static float area_triangle(Vec2 va, Vec2 vb, Vec2 vc);
 	static bool in_triangle(int x, int y,
 	ClippedVertex const &va, ClippedVertex const &vb, ClippedVertex const &vc);

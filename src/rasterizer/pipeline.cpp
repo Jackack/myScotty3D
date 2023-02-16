@@ -153,7 +153,9 @@ void Pipeline< primitive_type, Program, flags >::run(
 		} else if constexpr ((flags & PipelineMask_Depth) == Pipeline_Depth_Less) {
 			//"Less" means the depth test passes when the new fragment has depth less than the stored depth.
 			//A1T4: Depth_Less
-			//TODO: implement depth test! We want to only emit fragments that have a depth less than the stored depth, hence "Depth_Less"
+			if (f.fb_position.z >= fb_depth){
+				continue;
+			}
 		} else {
 			static_assert((flags & PipelineMask_Depth) <= Pipeline_Depth_Always, "Unknown depth test flag.");
 		}
@@ -176,13 +178,14 @@ void Pipeline< primitive_type, Program, flags >::run(
 				fb_color = sf.color;
 			} else if constexpr ((flags & PipelineMask_Blend) == Pipeline_Blend_Add) {
 				//A1T4: Blend_Add
-				//TODO: framebuffer color should have fragment color multiplied by fragment opacity added to it.
-				fb_color = sf.color; //<-- replace this line
+				//TODO: framebuffer color should have fragment color multiplied by fragment opacity added to i
+				fb_color += (sf.color * sf.opacity);
 			} else if constexpr ((flags & PipelineMask_Blend) == Pipeline_Blend_Over) {
 				//A1T4: Blend_Over
 				//TODO: set framebuffer color to the result of "over" blending (also called "alpha blending") the fragment color over the framebuffer color, using the fragment's opacity
-				// 		You may assume that the framebuffer color has its alpha premultiplied already, and you just want to compute the resulting composite color
-				fb_color = sf.color; //<-- replace this line
+ 				// You may assume that the framebuffer color has its alpha premultiplied already, and you just want to compute the resulting composite color
+				Spectrum sf_color = sf.opacity * sf.color;
+				fb_color = sf_color + (1 - sf.opacity) * fb_color;
 			} else {
 				static_assert((flags & PipelineMask_Blend) <= Pipeline_Blend_Over, "Unknown blending flag.");
 			}
@@ -677,13 +680,35 @@ void Pipeline< p, P, flags >::rasterize_line(
 }
 
 // use Heron's formula to calculate the area of a triangle
+// perform calculations in long double to mitigate loss
+// of precision
 template< PrimitiveType p, class P, uint32_t flags >
 float Pipeline< p, P, flags >::area_triangle(Vec2 va, Vec2 vb, Vec2 vc){
-	float a = (va - vb).norm();
-	float b = (va - vc).norm();
-	float c = (vb - vc).norm();
-	float s = (a + b + c) / 2;
-	return std::sqrt(s * (s - a) * (s - b) * (s - c));
+	long double a = static_cast<long double>((va - vb).norm());
+	long double b = static_cast<long double>((va - vc).norm());
+	long double c = static_cast<long double>((vb - vc).norm());
+	long double s = ((a + b + c) / 2.0L);
+	return static_cast<float>(std::sqrt(s * (s - a) * (s - b) * (s - c)));
+}
+
+// Compute Barycentric coordinates
+template< PrimitiveType p, class P, uint32_t flags >
+Vec3 Pipeline< p, P, flags >::barycentric(Vec2 vp, Vec2 va, Vec2 vb, Vec2 vc){
+	float denom = (det(va, vb) + det(vb, vc) + det(vc, va));
+	float wa = (det(vb, vc) + det(vp, (vb - vc)))/ denom;
+	float wb = (det(vc, va) + det(vp, (vc - va)))/ denom;
+	float wc = (det(va, vb) + det(vp, (va - vb)))/ denom;
+	return Vec3(wa, wb, wc);
+}
+
+// interpolate
+template< PrimitiveType p, class P, uint32_t flags >
+float Pipeline< p, P, flags >::interp_triangle(Vec3 traits, Vec2 vp, Vec2 va, Vec2 vb, Vec2 vc){
+	float denom = (det(va, vb) + det(vb, vc) + det(vc, va));
+	float wa = (det(vb, vc) + det(vp, (vb - vc)))/ denom;
+	float wb = (det(vc, va) + det(vp, (vc - va)))/ denom;
+	float wc = (det(va, vb) + det(vp, (va - vb)))/ denom;
+	return dot(Vec3(wa, wb, wc), traits);
 }
 
 template< PrimitiveType p, class P, uint32_t flags >
@@ -694,13 +719,11 @@ bool Pipeline< p, P, flags >::in_triangle(int x, int y,
 	// are guaranteed to be top or left. Therefore, conduct inclusive
 	// halfplane check on these two sides. Then conduct exclusive halfplane
 	// check on the third side.
-
-
 	float x_center = x + 0.5f;
 	float y_center = y + 0.5f;
 
 	float x_min = std::min({va.fb_position.x, vb.fb_position.x, vc.fb_position.x});
-	float y_min = std::min({va.fb_position.y, vb.fb_position.y, vc.fb_position.y});
+	// float y_min = std::min({va.fb_position.y, vb.fb_position.y, vc.fb_position.y});
 	ClippedVertex vleft, v1, v2;
 	if (va.fb_position.x == x_min){
 		vleft = va;
@@ -734,10 +757,9 @@ bool Pipeline< p, P, flags >::in_triangle(int x, int y,
 		if (x_center < v1.fb_position.x)
 			return false;
 	} else {
-		// if m1 > m2,  side 1 is the top side
-		if (m1 > m2 && y_center > m1 * x_center + b1)
+		if (v1.fb_position.y >= v2.fb_position.y && y_center > m1 * x_center + b1)
 			return false;
-		if (m1 < m2 && y_center < m1 * x_center + b1)
+		if (v1.fb_position.y < v2.fb_position.y && y_center < m1 * x_center + b1)
 			return false;
 	}
 
@@ -747,11 +769,9 @@ bool Pipeline< p, P, flags >::in_triangle(int x, int y,
 		if (x_center < v2.fb_position.x)
 			return false;
 	} else {
-		// if m2 > m1,  side 2 is the top side
-		// check is y center is under that side
-		if (m2 > m1 && y_center > m2 * x_center + b2)
+		if (v2.fb_position.y >= v1.fb_position.y && y_center > m2 * x_center + b2)
 			return false;
-		if (m2 < m1 && y_center < m2 * x_center + b2)
+		if (v2.fb_position.y < v1.fb_position.y && y_center < m2 * x_center + b2)
 			return false;
 	}
 
@@ -761,22 +781,21 @@ bool Pipeline< p, P, flags >::in_triangle(int x, int y,
 		if (x_center >= v2.fb_position.x)
 			return false;
 	} else {
-		if (m3 > 0 && y_center <= m3 * x_center + b3)
+		if (v2.fb_position.y >= vleft.fb_position.y && v1.fb_position.y >= vleft.fb_position.y) {
+			if (y_center >= m3 * x_center + b3)
+				return false;
+		} else if (v2.fb_position.y <= vleft.fb_position.y && v1.fb_position.y <= vleft.fb_position.y) {
+			if (y_center <= m3 * x_center + b3)
+				return false;
+		}
+
+		if (m3 >= 0 && y_center <= m3 * x_center + b3)
 			return false;
 		if (m3 < 0 && y_center >= m3 * x_center + b3)
 			return false;
-		// horizontal third side: halfplane orientation 
-		// depends on whether the side is top or bottom
-		if (v2.fb_position.y == v1.fb_position.y){
-			// the thrid side is a bottom side
-			if (v2.fb_position.y == y_min && y_center <= y_min)
-				return false;
-			// the third side is a horizontal top side
-			// we include points on the edge for this case
-			if (v2.fb_position.y != y_min && y_center > v2.fb_position.y)
-				return false;
-		}
+		
 	}
+
 	return true;
 }
 
@@ -844,48 +863,37 @@ void Pipeline< p, P, flags >::rasterize_triangle(
 		int xmax = static_cast<int>(std::ceil(std::max(va.fb_position.x, std::max(vb.fb_position.x, vc.fb_position.x))));
 		int ymin = static_cast<int>(std::floor(std::min(va.fb_position.y, std::min(vb.fb_position.y, vc.fb_position.y))));
 		int ymax = static_cast<int>(std::ceil(std::max(va.fb_position.y, std::max(vb.fb_position.y, vc.fb_position.y))));
-		float zmax = std::max(va.fb_position.z, std::max(vb.fb_position.z, vc.fb_position.z));
+
 		float za = va.fb_position.z;
 		float zb = vb.fb_position.z;
 		float zc = vc.fb_position.z;
 		bool same_z = false;
 		ClippedVertex vj, vk;
-
-		// printf("zabc: %f, %f, %f\n", za, zb, zc);
-		// assign vi, vj to the two vertices with smallest z
 		if (za == zb && zb == zc){
 			same_z = true;
-		}
-
-		if ((za != zmax && zb != zmax) || (za == zb)){
-			vj = va;
-			vk = vb;
-		} else if ((zc != zmax && zb != zmax) || (zc == zb)){
-			vj = vc;
-			vk = vb;
-		} else if ((za != zmax && zc != zmax) || (za == zc)){
-			vj = vc;
-			vk = va;
 		}
 
 		// step 2: iterate over all pixels inside bounding box, conducting a coverage
 		// test for each pixel. 
 
-		// step3: for each pixel passing coverage test, z value is interpolated using barycentric coordinates
+		// step3: for each pixel passing coverage test, z value is interpolated using barycentric coorhinates
 
 		for (int x = xmin; x <= xmax; x++){
 			for (int y = ymin; y <= ymax; y++){
 				if (in_triangle(x, y, va, vb, vc)){
 					float xf = static_cast<float>(x) + 0.5f;
 					float yf = static_cast<float>(y) + 0.5f;
-					float zf = va.fb_position.z;
+					float zf;
 					if (same_z){
 						zf = za;
 					} else {
-						zf = zmax * area_triangle(Vec2(xf, yf), vj.fb_position.xy(), vk.fb_position.xy())
-							/ area_triangle(va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy());
+						zf = interp_triangle(
+							Vec3(va.fb_position.z, vb.fb_position.z, vc.fb_position.z),
+							Vec2(xf, yf),
+							va.fb_position.xy(), 
+							vb.fb_position.xy(),
+							vc.fb_position.xy());
 					}
-
 					Fragment f;
 					f.fb_position.x = xf;
 					f.fb_position.y = yf;
@@ -897,12 +905,71 @@ void Pipeline< p, P, flags >::rasterize_triangle(
 			}
 		}
 	} else if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Screen) {
-		//A1T5: screen-space smooth triangles
-		//TODO: rasterize triangle (see block comment above this function).
+		// step 0: check if the triangle is degenerate. 
+		if (area_triangle(va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy()) == 0)
+			return;
 
-		//As a placeholder, here's code that calls the Flat interpolation version of the function:
-		//(remove this and replace it with a real solution)
-		Pipeline< PrimitiveType::Lines, P, (flags  & ~PipelineMask_Interp) | Pipeline_Interp_Flat >::rasterize_triangle(va, vb, vc, emit_fragment);
+		// step 1: generate screeen space bounding box from the 3 vertices
+		int xmin = static_cast<int>(std::floor(std::min(va.fb_position.x, std::min(vb.fb_position.x, vc.fb_position.x))));
+		int xmax = static_cast<int>(std::ceil(std::max(va.fb_position.x, std::max(vb.fb_position.x, vc.fb_position.x))));
+		int ymin = static_cast<int>(std::floor(std::min(va.fb_position.y, std::min(vb.fb_position.y, vc.fb_position.y))));
+		int ymax = static_cast<int>(std::ceil(std::max(va.fb_position.y, std::max(vb.fb_position.y, vc.fb_position.y))));
+
+		float za = va.fb_position.z;
+		float zb = vb.fb_position.z;
+		float zc = vc.fb_position.z;
+		bool same_z = false;
+		ClippedVertex vj, vk;
+		if (za == zb && zb == zc){
+			same_z = true;
+		}
+
+		// step 2: iterate over all pixels inside bounding box, conducting a coverage
+		// test for each pixel. 
+
+		// step3: for each pixel passing coverage test, z value is interpolated using barycentric coorhinates, and so are
+		// attributes.
+
+		for (int x = xmin; x <= xmax; x++){
+			for (int y = ymin; y <= ymax; y++){
+				if (in_triangle(x, y, va, vb, vc)){
+					float xf = static_cast<float>(x) + 0.5f;
+					float yf = static_cast<float>(y) + 0.5f;
+					float zf;
+					if (same_z){
+						zf = za;
+					} else {
+						zf = interp_triangle(
+							Vec3(va.fb_position.z, vb.fb_position.z, vc.fb_position.z),
+							Vec2(xf, yf),
+							va.fb_position.xy(), 
+							vb.fb_position.xy(),
+							vc.fb_position.xy());
+					}
+					Fragment f;
+					f.fb_position.x = xf;
+					f.fb_position.y = yf;
+					f.fb_position.z = zf;
+
+					int vertex_indices[5] = {6, 7, 3, 4, 5};
+					for (int i = 0; i < 4; i++){
+						int j = vertex_indices[i];
+						f.attributes[i] =
+							interp_triangle(
+							Vec3(va.attributes[j], vb.attributes[j], vc.attributes[j]),
+							Vec2(xf, yf),
+							va.fb_position.xy(), 
+							vb.fb_position.xy(),
+							vc.fb_position.xy());
+					}
+
+					f.derivatives.fill(Vec2(0.0f, 0.0f));
+					emit_fragment(f);
+				}
+			}
+		}
+
+
 	} else if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Correct) {
 		//A1T5: perspective correct triangles
 		//TODO: rasterize triangle (block comment above this function).
